@@ -1204,6 +1204,16 @@ def main() -> None:
     with st.sidebar:
         st.header("1. 判定マスタ")
 
+        st.info(
+            "📄 マスタのフォーマットはこちら\n"
+            "↓ ダウンロードしてご利用ください"
+        )
+
+        st.link_button(
+            "マスタフォーマットを開く",
+            "https://rak.box.com/s/0bw4j0ceukpt2is4wbjvwjskaohxejn5"
+        )
+
         master_file = st.file_uploader(
             "マスタExcel",
             type=["xlsx"],

@@ -235,6 +235,13 @@ def annotation_matches(
         except re.error:
             return False
 
+    if method == "数値付き":
+    escaped = re.escape(pattern)
+
+    regex = rf"(?:最大|約)?\s*\d[\d,]*\s*{escaped}"
+
+    return re.search(regex, text) is not None
+
     return target in source
 
 

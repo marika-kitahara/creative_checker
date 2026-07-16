@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 import zipfile
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -184,6 +185,57 @@ def normalized_text(value: str) -> str:
     空白・改行・全角スペースを除去し、英字は小文字化する。
     """
     return re.sub(r"[\s\u3000]+", "", clean_text(value)).lower()
+
+
+def normalized_annotation_text(value: str) -> str:
+    """
+    必須注釈照合用の緩やかな正規化。
+
+    - 全角・半角を統一
+    - 空白、改行、注釈記号、句読点を除去
+    - 文末の「です」「ます」を除去
+    """
+    text = unicodedata.normalize("NFKC", clean_text(value)).lower()
+    text = re.sub(r"[\s\u3000※*＊・。、「」『』【】\[\]（）()：:;；!！?？]+", "", text)
+
+    for ending in ("です", "ます"):
+        if text.endswith(ending):
+            text = text[: -len(ending)]
+
+    return text
+
+
+def annotation_matches(
+    ocr_text: str,
+    required_annotation: str,
+    match_method: str,
+) -> bool:
+    """
+    必須注釈をOCR結果と照合する。
+    記号や文末表現の差を許容する。
+    """
+    source = normalized_annotation_text(ocr_text)
+    target = normalized_annotation_text(required_annotation)
+
+    if not target:
+        return False
+
+    method = clean_text(match_method)
+
+    if method == "完全一致":
+        return source == target
+
+    if method == "正規表現":
+        try:
+            return re.search(
+                required_annotation,
+                ocr_text,
+                flags=re.IGNORECASE | re.MULTILINE,
+            ) is not None
+        except re.error:
+            return False
+
+    return target in source
 
 
 def safe_file_stem(file_name: str) -> str:
@@ -679,7 +731,7 @@ def check_required_annotations(
             continue
 
         annotation = clean_text(row.get("必須注釈"))
-        annotation_found = matches_rule(
+        annotation_found = annotation_matches(
             ocr_text,
             annotation,
             clean_text(row.get("注釈一致方法")),

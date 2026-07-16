@@ -68,6 +68,53 @@ NG_FILL = PatternFill("solid", fgColor="F4CCCC")
 WARN_FILL = PatternFill("solid", fgColor="FFF2CC")
 OK_FILL = PatternFill("solid", fgColor="D9EAD3")
 
+EXCEL_FONT_NAME = "Meiryo UI"
+
+FILE_SUMMARY_COLUMN_NAMES = {
+    "thumbnail": "画像",
+    "file_name": "ファイル名",
+    "relative_path": "相対パス",
+    "extension": "拡張子",
+    "width_px": "横幅（px）",
+    "height_px": "縦幅（px）",
+    "aspect_ratio": "アスペクト比",
+    "color_mode": "カラーモード",
+    "file_size_mb": "ファイルサイズ（MB）",
+    "sha256": "SHA-256",
+    "ocr_text": "OCR抽出テキスト",
+    "overall_judgment": "総合判定",
+    "ng_count": "NG件数",
+    "review_count": "要確認件数",
+}
+
+CHECK_RESULT_COLUMN_NAMES = {
+    "file_name": "ファイル名",
+    "relative_path": "相対パス",
+    "rule_id": "ルールID",
+    "rule_type": "ルール種別",
+    "category": "カテゴリ",
+    "judgment": "判定",
+    "matched_text": "検出・不足内容",
+    "message": "判定結果・メッセージ",
+    "check_detail": "確認補足",
+    "ai_check_required": "AI確認要否",
+    "ai_check_category": "AI確認カテゴリ",
+    "ai_check_question": "AIへの確認事項",
+    "ai_priority": "AI確認優先度",
+    "detected_by": "検出方法",
+}
+
+AI_CHECK_COLUMN_NAMES = {
+    "file_name": "ファイル名",
+    "relative_path": "相対パス",
+    "source": "確認事項の出所",
+    "rule_id": "ルールID",
+    "category": "カテゴリ",
+    "priority": "優先度",
+    "question": "AI確認事項",
+    "answer_required": "回答必須",
+}
+
 
 # ============================================================
 # データ型
@@ -894,9 +941,14 @@ def dataframe_from_dataclasses(items: Iterable[Any], columns: list[str]) -> pd.D
 
 
 def style_worksheet(ws) -> None:
+    """Excelシート全体の見た目を整える。"""
     for cell in ws[1]:
         cell.fill = HEADER_FILL
-        cell.font = HEADER_FONT
+        cell.font = Font(
+            name=EXCEL_FONT_NAME,
+            color="FFFFFF",
+            bold=True,
+        )
         cell.alignment = Alignment(
             horizontal="center",
             vertical="center",
@@ -908,6 +960,7 @@ def style_worksheet(ws) -> None:
 
     for row in ws.iter_rows(min_row=2):
         for cell in row:
+            cell.font = Font(name=EXCEL_FONT_NAME)
             cell.alignment = Alignment(
                 vertical="top",
                 wrap_text=True,
@@ -919,7 +972,10 @@ def style_worksheet(ws) -> None:
         for cell in column_cells[:1000]:
             value = "" if cell.value is None else str(cell.value)
             max_length = max(max_length, min(len(value), 60))
-        ws.column_dimensions[column_letter].width = max(10, min(max_length + 2, 55))
+        ws.column_dimensions[column_letter].width = max(
+            10,
+            min(max_length + 2, 55),
+        )
 
 
 def apply_result_colors(ws, judgment_header: str) -> None:
@@ -951,7 +1007,7 @@ def add_thumbnail_images(
     image_bytes_map: dict[str, bytes],
 ) -> None:
     """
-    01_ファイル一覧のA列へ縮小画像を貼り付ける。
+    「01_ファイル一覧」の「画像」列へ縮小画像を貼り付ける。
     元画像の縦横比を維持し、最大140×90px程度に収める。
     """
     ws.column_dimensions["A"].width = 24
@@ -1015,23 +1071,34 @@ def create_result_excel(
 
     summary_df = dataframe_from_dataclasses(summaries, summary_columns)
     summary_df.insert(0, "thumbnail", "")
+    summary_df = summary_df.rename(columns=FILE_SUMMARY_COLUMN_NAMES)
+
     results_df = dataframe_from_dataclasses(all_results, result_columns)
+    results_df = results_df.rename(columns=CHECK_RESULT_COLUMN_NAMES)
+
     ai_df = dataframe_from_dataclasses(all_ai_items, ai_columns)
+    ai_df = ai_df.rename(columns=AI_CHECK_COLUMN_NAMES)
 
     prompts_df = pd.DataFrame(
         [
             {
-                "relative_path": relative_path,
+                "相対パス": relative_path,
                 "AI用プロンプト": prompt,
             }
             for relative_path, prompt in prompts.items()
         ],
-        columns=["relative_path", "AI用プロンプト"],
+        columns=["相対パス", "AI用プロンプト"],
     )
 
     errors_df = pd.DataFrame(
-        errors,
-        columns=["relative_path", "エラー内容"],
+        [
+            {
+                "相対パス": clean_text(error.get("relative_path")),
+                "エラー内容": clean_text(error.get("エラー内容")),
+            }
+            for error in errors
+        ],
+        columns=["相対パス", "エラー内容"],
     )
 
     append_dataframe_sheet(wb, "01_ファイル一覧", summary_df)
@@ -1045,8 +1112,8 @@ def create_result_excel(
     append_dataframe_sheet(wb, "04_AIプロンプト", prompts_df)
     append_dataframe_sheet(wb, "05_エラー", errors_df)
 
-    apply_result_colors(wb["01_ファイル一覧"], "overall_judgment")
-    apply_result_colors(wb["02_Python判定結果"], "judgment")
+    apply_result_colors(wb["01_ファイル一覧"], "総合判定")
+    apply_result_colors(wb["02_Python判定結果"], "判定")
 
     output = BytesIO()
     wb.save(output)
@@ -1463,6 +1530,9 @@ def main() -> None:
             )
 
     progress.progress(1.0, text="チェックが完了しました。")
+
+    if summaries:
+        st.balloons()
 
     if not summaries:
         st.error("正常に処理できた画像がありませんでした。")

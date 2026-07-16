@@ -712,11 +712,14 @@ def check_warning_words(
         warning_word = clean_text(row.get("注意ワード"))
         exclude_text = clean_text(row.get("除外文言"))
 
-        # 除外文言が含まれる場合はこの注意ワードをスキップ
-        if exclude_text and annotation_matches(
-            ocr_text,
-            exclude_text,
-            "部分一致",
+        # 除外文言がOCRに含まれていたら、この注意ワード判定はスキップ
+        if (
+            exclude_text
+            and annotation_matches(
+                ocr_text,
+                exclude_text,
+                "部分一致",
+            )
         ):
             continue
 

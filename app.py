@@ -12,6 +12,7 @@ from typing import Any, Iterable
 import pandas as pd
 import streamlit as st
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from PIL import Image, UnidentifiedImageError
@@ -269,6 +270,21 @@ def load_master_from_bytes(master_bytes: bytes) -> dict[str, pd.DataFrame]:
 # ============================================================
 # OCR
 # ============================================================
+
+def get_ocr_package_status() -> tuple[bool, str]:
+    """OCRパッケージが環境に導入されているかを実行前に確認する。"""
+    try:
+        import rapidocr  # noqa: F401
+        return True, "rapidocr"
+    except ImportError:
+        pass
+
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+        return True, "rapidocr_onnxruntime"
+    except ImportError:
+        return False, ""
+
 
 @st.cache_resource(show_spinner=False)
 def get_ocr_engine():
@@ -914,6 +930,43 @@ def apply_result_colors(ws, judgment_header: str) -> None:
         ws.cell(row=row_num, column=judgment_col).fill = fill
 
 
+def add_thumbnail_images(
+    ws,
+    summaries: list[FileSummary],
+    image_bytes_map: dict[str, bytes],
+) -> None:
+    """
+    01_ファイル一覧のA列へ縮小画像を貼り付ける。
+    元画像の縦横比を維持し、最大140×90px程度に収める。
+    """
+    ws.column_dimensions["A"].width = 24
+
+    for row_num, summary in enumerate(summaries, start=2):
+        image_bytes = image_bytes_map.get(summary.relative_path)
+        if not image_bytes:
+            continue
+
+        try:
+            pil_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+            pil_image.thumbnail((140, 90))
+
+            thumbnail_stream = BytesIO()
+            pil_image.save(thumbnail_stream, format="PNG")
+            thumbnail_stream.seek(0)
+
+            excel_image = XLImage(thumbnail_stream)
+            excel_image.width = pil_image.width
+            excel_image.height = pil_image.height
+
+            # save時までBytesIOを保持する
+            excel_image._thumbnail_stream = thumbnail_stream
+            ws.add_image(excel_image, f"A{row_num}")
+            ws.row_dimensions[row_num].height = 72
+        except Exception:
+            # サムネイル生成失敗だけでExcel出力全体を止めない
+            ws.cell(row=row_num, column=1, value="画像貼付失敗")
+
+
 def append_dataframe_sheet(wb: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     ws = wb.create_sheet(title=sheet_name)
 
@@ -935,6 +988,7 @@ def create_result_excel(
     all_ai_items: list[AICheckItem],
     prompts: dict[str, str],
     errors: list[dict[str, str]],
+    image_bytes_map: dict[str, bytes],
 ) -> bytes:
     wb = Workbook()
     default_sheet = wb.active
@@ -945,6 +999,7 @@ def create_result_excel(
     ai_columns = list(AICheckItem.__annotations__.keys())
 
     summary_df = dataframe_from_dataclasses(summaries, summary_columns)
+    summary_df.insert(0, "thumbnail", "")
     results_df = dataframe_from_dataclasses(all_results, result_columns)
     ai_df = dataframe_from_dataclasses(all_ai_items, ai_columns)
 
@@ -965,6 +1020,11 @@ def create_result_excel(
     )
 
     append_dataframe_sheet(wb, "01_ファイル一覧", summary_df)
+    add_thumbnail_images(
+        wb["01_ファイル一覧"],
+        summaries,
+        image_bytes_map,
+    )
     append_dataframe_sheet(wb, "02_Python判定結果", results_df)
     append_dataframe_sheet(wb, "03_AI確認事項", ai_df)
     append_dataframe_sheet(wb, "04_AIプロンプト", prompts_df)
@@ -1180,9 +1240,21 @@ def main() -> None:
             selected_condition_labels.append("特典・ポイント記載あり")
 
         st.header("3. OCR")
+        ocr_available, ocr_package_name = get_ocr_package_status()
+
+        if ocr_available:
+            st.success(f"OCR利用可能：{ocr_package_name}")
+        else:
+            st.error(
+                "OCRライブラリが未導入です。"
+                "リポジトリ直下のrequirements.txtを更新して、"
+                "StreamlitアプリをRebootしてください。"
+            )
+
         run_ocr_enabled = st.checkbox(
             "OCRを実行する",
-            value=True,
+            value=ocr_available,
+            disabled=not ocr_available,
             help="RapidOCRで画像内の文字を抽出します。",
         )
 
@@ -1389,6 +1461,7 @@ def main() -> None:
         all_ai_items=all_ai_items,
         prompts=prompts,
         errors=errors,
+        image_bytes_map=image_bytes_map,
     )
     prompt_zip = create_prompt_zip(prompts)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

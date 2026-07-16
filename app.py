@@ -274,35 +274,52 @@ def load_master_from_bytes(master_bytes: bytes) -> dict[str, pd.DataFrame]:
 def get_ocr_engine():
     """
     RapidOCRを遅延ロードする。
-    requirements.txtには rapidocr_onnxruntime を追加する。
+    現行の rapidocr を優先し、旧 rapidocr_onnxruntime にも対応する。
     """
     try:
+        from rapidocr import RapidOCR
+        return RapidOCR()
+    except ImportError:
+        pass
+
+    try:
         from rapidocr_onnxruntime import RapidOCR
+        return RapidOCR()
     except ImportError as exc:
         raise RuntimeError(
-            "OCRライブラリが見つかりません。"
-            "requirements.txtに rapidocr_onnxruntime を追加してください。"
+            "OCRライブラリがインストールされていません。"
+            "requirements.txtに rapidocr を追加し、Streamlitアプリを再起動してください。"
         ) from exc
-
-    return RapidOCR()
 
 
 @st.cache_data(show_spinner=False)
 def run_ocr(image_bytes: bytes) -> str:
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
     engine = get_ocr_engine()
-    result, _ = engine(image)
+    output = engine(image)
+
+    # rapidocr v3はRapidOCROutput、旧版は(result, elapsed)を返す。
+    if hasattr(output, "txts"):
+        return "\n".join(
+            clean_text(value)
+            for value in (output.txts or [])
+            if clean_text(value)
+        )
+
+    if isinstance(output, tuple):
+        result = output[0]
+    else:
+        result = output
 
     if not result:
         return ""
 
     texts: list[str] = []
     for item in result:
-        # RapidOCR標準： [box, text, score]
         if len(item) >= 2:
-            text = clean_text(item[1])
-            if text:
-                texts.append(text)
+            value = clean_text(item[1])
+            if value:
+                texts.append(value)
 
     return "\n".join(texts)
 
@@ -1120,19 +1137,30 @@ def main() -> None:
             help="マスタはアプリ内に保存せず、アップロードされた内容をメモリ上で読み込みます。",
         )
 
-        st.header("2. 適用条件")
+        st.header("2. 追加ルール（任意）")
+        st.caption(
+            "画像の掲載先や内容が分かる場合だけ選択してください。"
+            "未選択でも共通ルールのチェックは実行されます。"
+        )
 
         selected_platform = st.multiselect(
-            "投稿媒体",
+            "この画像を掲載する媒体",
             options=["X", "Instagram", "YouTube"],
             default=[],
-            help="必須PR表記など、媒体別ルールの適用に使います。",
+            placeholder="必要な場合のみ選択",
+            help=(
+                "選択した媒体に応じて「PR」表記などの媒体別ルールを追加します。"
+                "単なるバナー画像の確認なら未選択で構いません。"
+            ),
         )
 
         benefit_claim = st.checkbox(
-            "特典・付与ポイントを記載している",
+            "画像内で特典・ポイントを訴求している",
             value=False,
-            help="オンにするとBENEFIT条件の必須文言ルールを適用します。",
+            help=(
+                "ポイント付与や口座開設特典などを訴求する画像でオンにします。"
+                "特典条件や詳細ページ誘導の必須チェックを追加します。"
+            ),
         )
 
         selected_conditions: set[str] = set()
@@ -1159,36 +1187,21 @@ def main() -> None:
         )
 
     st.subheader("チェック対象画像")
-
-    upload_tab, folder_tab = st.tabs(
-        ["画像ファイルを複数選択", "フォルダごと選択"]
+    st.caption(
+        "画像を複数選択するか、画像が入ったフォルダをこの欄へドラッグ＆ドロップしてください。"
     )
 
-    with upload_tab:
-        selected_files = st.file_uploader(
-            "複数の画像を選択してください",
-            type=sorted(SUPPORTED_IMAGE_EXTENSIONS),
-            accept_multiple_files=True,
-            key="multiple_image_uploader",
-        )
+    selected_files = st.file_uploader(
+        "画像ファイルまたはフォルダ",
+        type=sorted(SUPPORTED_IMAGE_EXTENSIONS),
+        accept_multiple_files=True,
+        key="image_uploader",
+    )
 
-    with folder_tab:
-        st.caption(
-            "フォルダ内の対応画像をまとめて選択します。"
-            "サブフォルダの画像も対象になります。"
-        )
-        folder_files = st.file_uploader(
-            "画像フォルダを選択してください",
-            type=sorted(SUPPORTED_IMAGE_EXTENSIONS),
-            accept_multiple_files="directory",
-            key="directory_image_uploader",
-        )
-
-    # 両方のアップローダーに同一画像がある場合は、相対パス＋ハッシュで重複除去
     uploaded_files: list[Any] = []
     seen_uploads: set[tuple[str, str]] = set()
 
-    for uploaded in list(selected_files or []) + list(folder_files or []):
+    for uploaded in list(selected_files or []):
         relative_path = relative_upload_path(uploaded)
         file_bytes = uploaded.getvalue()
         content_hash = hashlib.sha256(file_bytes).hexdigest()
@@ -1253,8 +1266,13 @@ def main() -> None:
 
             image_info = inspect_image(image_bytes)
 
+            ocr_warning = ""
             if run_ocr_enabled:
-                ocr_text = run_ocr(image_bytes)
+                try:
+                    ocr_text = run_ocr(image_bytes)
+                except Exception as ocr_exc:
+                    ocr_text = ""
+                    ocr_warning = str(ocr_exc)
             else:
                 ocr_text = ""
 
@@ -1267,6 +1285,29 @@ def main() -> None:
                 selected_conditions=selected_conditions,
                 master=master,
             )
+
+            if ocr_warning:
+                python_results.append(
+                    CheckResult(
+                        file_name=file_name,
+                        relative_path=relative_path,
+                        rule_id="SYS_OCR",
+                        rule_type="システム",
+                        category="OCR",
+                        judgment="要確認",
+                        matched_text="OCR未実行",
+                        message=(
+                            "OCRを実行できなかったため、文字ルールは未判定です。"
+                            "画像情報と共通AI確認事項は出力しています。"
+                        ),
+                        check_detail=ocr_warning,
+                        ai_check_required="不要",
+                        ai_check_category="OCR",
+                        ai_check_question="",
+                        ai_priority="高",
+                    )
+                )
+                python_results = sort_results(python_results)
 
             ai_items = build_ai_check_items(
                 file_name=file_name,

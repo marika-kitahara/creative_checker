@@ -272,18 +272,33 @@ def load_master_from_bytes(master_bytes: bytes) -> dict[str, pd.DataFrame]:
 # ============================================================
 
 def get_ocr_package_status() -> tuple[bool, str]:
-    """OCRパッケージが環境に導入されているかを実行前に確認する。"""
+    """
+    OCRクラスを実際に読み込み、利用可否と詳細メッセージを返す。
+    単なる未導入だけでなく、依存関係のImportErrorや初期化前エラーも可視化する。
+    """
     try:
-        import rapidocr  # noqa: F401
+        from rapidocr import RapidOCR  # noqa: F401
         return True, "rapidocr"
-    except ImportError:
-        pass
+    except Exception as rapidocr_exc:
+        rapidocr_error = (
+            f"{type(rapidocr_exc).__name__}: {rapidocr_exc}"
+        )
 
     try:
-        import rapidocr_onnxruntime  # noqa: F401
+        from rapidocr_onnxruntime import RapidOCR  # noqa: F401
         return True, "rapidocr_onnxruntime"
-    except ImportError:
-        return False, ""
+    except Exception as legacy_exc:
+        legacy_error = (
+            f"{type(legacy_exc).__name__}: {legacy_exc}"
+        )
+
+    return (
+        False,
+        "rapidocr読込エラー："
+        f"{rapidocr_error} / "
+        "旧版読込エラー："
+        f"{legacy_error}",
+    )
 
 
 @st.cache_resource(show_spinner=False)
@@ -1246,9 +1261,12 @@ def main() -> None:
             st.success(f"OCR利用可能：{ocr_package_name}")
         else:
             st.error(
-                "OCRライブラリが未導入です。"
-                "リポジトリ直下のrequirements.txtを更新して、"
-                "StreamlitアプリをRebootしてください。"
+                "OCR初期化エラー："
+                f"{ocr_package_name}"
+            )
+            st.caption(
+                "requirements.txt上は導入済みでも、依存関係や実行環境の問題で"
+                "RapidOCRクラスを読み込めない場合があります。"
             )
 
         run_ocr_enabled = st.checkbox(

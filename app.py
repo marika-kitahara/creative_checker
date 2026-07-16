@@ -370,7 +370,6 @@ def main() -> None:
     cols[0].metric("処理済み", len(summaries))
     cols[1].metric("NG", sum(r.judgment == "NG" for r in all_results))
     cols[2].metric("要確認", sum(r.judgment == "要確認" for r in all_results))
-    cols[3].metric("Python OK", sum(r.judgment == "OK" for r in all_results))
 
     excel = create_result_excel(
         summaries, all_results, all_ai_items,

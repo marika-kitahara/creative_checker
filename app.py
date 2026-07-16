@@ -30,7 +30,7 @@ REQUIRED_MASTER_COLUMNS: dict[str, list[str]] = {
     "01_NGワード": [
         "rule_id", "ステータス", "カテゴリ", "対象", "NG表現", "一致方法",
         "判定結果", "NG理由として出力する文言",
-        "AI確認要否", "AI確認カテゴリ", "AIへの確認事項", "AI確認優先度", "除外文言",
+        "AI確認要否", "AI確認カテゴリ", "AIへの確認事項", "AI確認優先度",
     ],
     "02_必須文言": [
         "rule_id", "ステータス", "カテゴリ", "対象", "適用条件コード",
@@ -39,7 +39,7 @@ REQUIRED_MASTER_COLUMNS: dict[str, list[str]] = {
     ],
     "03_注意ワード": [
         "rule_id", "ステータス", "カテゴリ", "対象", "注意ワード",
-        "一致方法", "判定結果", "確認内容", "出力文言",
+        "一致方法", "除外文言", "判定結果", "確認内容", "出力文言",
         "AI確認要否", "AI確認カテゴリ", "AIへの確認事項", "AI確認優先度",
     ],
     "04_訴求別_必須注釈": [
@@ -703,6 +703,12 @@ def check_warning_words(
     ocr_text: str,
     master_df: pd.DataFrame,
 ) -> list[CheckResult]:
+    """
+    注意ワードを検出する。
+
+    「除外文言」がOCR結果に含まれる場合は、
+    その注意ワードルールをスキップする。
+    """
     results: list[CheckResult] = []
 
     for _, row in master_df.iterrows():
@@ -712,7 +718,7 @@ def check_warning_words(
         warning_word = clean_text(row.get("注意ワード"))
         exclude_text = clean_text(row.get("除外文言"))
 
-        # 除外文言がOCRに含まれていたら、この注意ワード判定はスキップ
+        # 除外文言は、記号・全半角・文末の「です／ます」の差を吸収して照合
         if (
             exclude_text
             and annotation_matches(

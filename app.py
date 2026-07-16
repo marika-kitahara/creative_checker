@@ -235,13 +235,6 @@ def annotation_matches(
         except re.error:
             return False
 
-    if method == "数値付き":
-    escaped = re.escape(pattern)
-
-    regex = rf"(?:最大|約)?\s*\d[\d,]*\s*{escaped}"
-
-    return re.search(regex, text) is not None
-
     return target in source
 
 
@@ -287,9 +280,36 @@ def matches_rule(text: str, pattern: str, match_method: str) -> bool:
 
     if method == "正規表現":
         try:
-            return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) is not None
+            return re.search(
+                pattern,
+                text,
+                flags=re.IGNORECASE | re.MULTILINE,
+            ) is not None
         except re.error:
             return False
+
+    if method == "数値付き":
+        escaped_pattern = re.escape(clean_text(pattern))
+
+        # 対応例：
+        # 100ポイント
+        # 5,000ポイント
+        # 約300ポイント
+        # 最大20,000ポイント
+        # 10万ポイント
+        # 1.5ポイント
+        number_pattern = (
+            r"(?:最大|約|およそ)?\s*"
+            r"\d+(?:[.,]\d+)*(?:万|千|億)?"
+            r"\s*"
+            + escaped_pattern
+        )
+
+        return re.search(
+            number_pattern,
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        ) is not None
 
     # マスタの標準は部分一致
     return target in source
@@ -1647,24 +1667,20 @@ def main() -> None:
     st.divider()
     st.subheader("集計")
 
-    # 集計
     total_ng = sum(
         result.judgment == "NG"
         for result in all_results
     )
-
     total_review = sum(
         result.judgment == "要確認"
         for result in all_results
     )
-
     python_ok_count = sum(
         result.judgment == "OK"
         for result in all_results
     )
 
     col1, col2, col3, col4 = st.columns(4)
-
     col1.metric("処理済み", len(summaries))
     col2.metric("NG", total_ng)
     col3.metric("要確認", total_review)

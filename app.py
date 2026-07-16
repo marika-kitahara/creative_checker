@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 
 # ============================================================
@@ -168,6 +168,13 @@ class AICheckItem:
     answer_required: str
 
 
+@dataclass
+class OCRBlock:
+    text: str
+    box: list[list[float]]
+    score: float | None = None
+
+
 # ============================================================
 # 共通関数
 # ============================================================
@@ -203,6 +210,27 @@ def normalized_annotation_text(value: str) -> str:
             text = text[: -len(ending)]
 
     return text
+
+
+def split_exclusion_texts(value: str) -> list[str]:
+    """
+    除外文言セルを複数の文言へ分割する。
+
+    対応区切り：
+    - セル内改行
+    - 半角パイプ |
+    - 全角パイプ ｜
+    """
+    raw = clean_text(value)
+    if not raw:
+        return []
+
+    parts = re.split(r"[\r\n|｜]+", raw)
+    return [
+        part.strip()
+        for part in parts
+        if part.strip()
+    ]
 
 
 def annotation_matches(
@@ -450,35 +478,107 @@ def get_ocr_engine():
 
 
 @st.cache_data(show_spinner=False)
-def run_ocr(image_bytes: bytes) -> str:
+def run_ocr(image_bytes: bytes) -> dict[str, Any]:
+    """
+    OCR文字列と文字ブロックの座標を返す。
+
+    戻り値：
+    {
+        "text": "OCR全文",
+        "blocks": [
+            {
+                "text": "認識文字",
+                "box": [[x1, y1], [x2, y2], [x3, y3], [x4, y4]],
+                "score": 0.99,
+            }
+        ],
+    }
+    """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
     engine = get_ocr_engine()
     output = engine(image)
 
-    # rapidocr v3はRapidOCROutput、旧版は(result, elapsed)を返す。
-    if hasattr(output, "txts"):
-        return "\n".join(
-            clean_text(value)
-            for value in (output.txts or [])
-            if clean_text(value)
-        )
+    blocks: list[dict[str, Any]] = []
 
+    # RapidOCR v3系：RapidOCROutput
+    if hasattr(output, "txts"):
+        txts = list(output.txts or [])
+        boxes = list(getattr(output, "boxes", None) or [])
+        scores = list(getattr(output, "scores", None) or [])
+
+        for index, value in enumerate(txts):
+            block_text = clean_text(value)
+            if not block_text:
+                continue
+
+            raw_box = boxes[index] if index < len(boxes) else []
+            raw_score = scores[index] if index < len(scores) else None
+
+            box = [
+                [float(point[0]), float(point[1])]
+                for point in raw_box
+                if len(point) >= 2
+            ]
+
+            blocks.append(
+                {
+                    "text": block_text,
+                    "box": box,
+                    "score": (
+                        float(raw_score)
+                        if raw_score is not None
+                        else None
+                    ),
+                }
+            )
+
+        return {
+            "text": "\n".join(block["text"] for block in blocks),
+            "blocks": blocks,
+        }
+
+    # 旧RapidOCR系：(result, elapsed)
     if isinstance(output, tuple):
         result = output[0]
     else:
         result = output
 
     if not result:
-        return ""
+        return {"text": "", "blocks": []}
 
-    texts: list[str] = []
     for item in result:
-        if len(item) >= 2:
-            value = clean_text(item[1])
-            if value:
-                texts.append(value)
+        if len(item) < 2:
+            continue
 
-    return "\n".join(texts)
+        raw_box = item[0] if len(item) >= 1 else []
+        block_text = clean_text(item[1])
+        raw_score = item[2] if len(item) >= 3 else None
+
+        if not block_text:
+            continue
+
+        box = [
+            [float(point[0]), float(point[1])]
+            for point in raw_box
+            if len(point) >= 2
+        ]
+
+        blocks.append(
+            {
+                "text": block_text,
+                "box": box,
+                "score": (
+                    float(raw_score)
+                    if raw_score is not None
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "text": "\n".join(block["text"] for block in blocks),
+        "blocks": blocks,
+    }
 
 
 # ============================================================
@@ -501,6 +601,171 @@ def inspect_image(image_bytes: bytes) -> dict[str, Any]:
         }
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValueError("画像ファイルを正常に読み込めません。") from exc
+
+
+def result_search_terms(result: CheckResult) -> list[str]:
+    """
+    判定結果から画像上で探す語句候補を作る。
+
+    必須文言の不足など、画像内に存在しないものは候補なし。
+    """
+    if result.rule_type in {"必須文言", "必須文言・設定", "システム"}:
+        return []
+
+    terms: list[str] = []
+
+    if result.matched_text:
+        # 「対象項目: 実値」の形式チェックは画像内文字ではない
+        if not (
+            result.rule_type == "媒体・形式条件"
+            and ":" in result.matched_text
+        ):
+            terms.append(result.matched_text)
+
+    # OKになった必須注釈は、確認補足から注釈本文も候補へ追加
+    prefix = "検出した注釈："
+    if result.check_detail.startswith(prefix):
+        annotation = result.check_detail[len(prefix):].strip()
+        if annotation:
+            terms.append(annotation)
+
+    return list(dict.fromkeys(term for term in terms if term))
+
+
+def block_matches_term(
+    block_text: str,
+    term: str,
+    result: CheckResult,
+) -> bool:
+    """
+    OCRブロックが判定対象語に該当するか確認する。
+    """
+    if not block_text or not term:
+        return False
+
+    if result.rule_type == "注意ワード" and result.matched_text:
+        # 「数値付き」ルールを含め、ブロック内に数値＋対象語がある場合を優先
+        escaped = re.escape(clean_text(term))
+        numeric_pattern = (
+            r"(?:最大|約|およそ)?\s*"
+            r"\d+(?:[.,]\d+)*(?:万|千|億)?"
+            r"\s*"
+            + escaped
+        )
+        if re.search(
+            numeric_pattern,
+            block_text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
+    normalized_block = normalized_annotation_text(block_text)
+    normalized_term = normalized_annotation_text(term)
+
+    if not normalized_term:
+        return False
+
+    return normalized_term in normalized_block
+
+
+def judgment_color(judgment: str) -> tuple[int, int, int]:
+    if judgment == "NG":
+        return (220, 30, 30)
+    if judgment == "要確認":
+        return (255, 140, 0)
+    if judgment == "OK":
+        return (40, 160, 70)
+    return (80, 80, 80)
+
+
+def create_highlighted_image(
+    image_bytes: bytes,
+    ocr_blocks: list[dict[str, Any]],
+    results: list[CheckResult],
+) -> tuple[bytes, int]:
+    """
+    OCR座標を使い、判定対象の文字ブロックを囲ったPNG画像を作る。
+
+    NG：赤
+    要確認：オレンジ
+    OK：緑
+    """
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    highlighted_count = 0
+    used_labels: set[tuple[str, int, int]] = set()
+
+    for result in results:
+        terms = result_search_terms(result)
+        if not terms:
+            continue
+
+        color = judgment_color(result.judgment)
+
+        for block in ocr_blocks:
+            block_text = clean_text(block.get("text"))
+            raw_box = block.get("box") or []
+
+            if len(raw_box) < 4:
+                continue
+
+            matched = any(
+                block_matches_term(block_text, term, result)
+                for term in terms
+            )
+            if not matched:
+                continue
+
+            points = [
+                (int(round(point[0])), int(round(point[1])))
+                for point in raw_box
+                if len(point) >= 2
+            ]
+            if len(points) < 4:
+                continue
+
+            # OCRの四角形に沿って描画
+            closed_points = points + [points[0]]
+            draw.line(
+                closed_points,
+                fill=color,
+                width=5,
+                joint="curve",
+            )
+
+            left = min(point[0] for point in points)
+            top = min(point[1] for point in points)
+            label = f"{result.judgment} {result.rule_id}"
+            label_key = (label, left, top)
+
+            if label_key not in used_labels:
+                used_labels.add(label_key)
+
+                text_bbox = draw.textbbox((0, 0), label, font=font)
+                label_width = text_bbox[2] - text_bbox[0] + 10
+                label_height = text_bbox[3] - text_bbox[1] + 8
+
+                label_top = max(0, top - label_height)
+                label_right = min(image.width, left + label_width)
+
+                draw.rectangle(
+                    [left, label_top, label_right, top],
+                    fill=color,
+                )
+                draw.text(
+                    (left + 5, label_top + 3),
+                    label,
+                    fill=(255, 255, 255),
+                    font=font,
+                )
+
+            highlighted_count += 1
+
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue(), highlighted_count
 
 
 # ============================================================
@@ -716,16 +981,20 @@ def check_warning_words(
             continue
 
         warning_word = clean_text(row.get("注意ワード"))
-        exclude_text = clean_text(row.get("除外文言"))
+        exclusion_texts = split_exclusion_texts(
+            clean_text(row.get("除外文言"))
+        )
 
-        # 除外文言は、記号・全半角・文末の「です／ます」の差を吸収して照合
-        if (
-            exclude_text
-            and annotation_matches(
+        # いずれかの除外文言がOCRに含まれていたら、
+        # この注意ワードルールをスキップする。
+        # 記号・全半角・文末の「です／ます」の差も吸収する。
+        if any(
+            annotation_matches(
                 ocr_text,
-                exclude_text,
+                exclusion_text,
                 "部分一致",
             )
+            for exclusion_text in exclusion_texts
         ):
             continue
 
@@ -1283,6 +1552,8 @@ def render_result_card(
     ai_items: list[AICheckItem],
     prompt: str,
     image_bytes: bytes,
+    highlighted_image_bytes: bytes,
+    highlighted_count: int,
 ) -> None:
     status_icon = {
         "NG": "🔴",
@@ -1297,7 +1568,35 @@ def render_result_card(
         image_col, info_col = st.columns([1, 1])
 
         with image_col:
-            st.image(image_bytes, caption=summary.relative_path)
+            original_image_tab, highlighted_image_tab = st.tabs(
+                ["元画像", "指摘箇所を強調"]
+            )
+
+            with original_image_tab:
+                st.image(
+                    image_bytes,
+                    caption=summary.relative_path,
+                )
+
+            with highlighted_image_tab:
+                st.image(
+                    highlighted_image_bytes,
+                    caption=(
+                        f"{summary.relative_path}｜"
+                        f"強調箇所 {highlighted_count}件"
+                    ),
+                )
+
+                if highlighted_count == 0:
+                    st.info(
+                        "画像上で位置を特定できる指摘はありませんでした。"
+                        "必須文言の不足やファイル形式の判定は、"
+                        "Python判定タブで確認してください。"
+                    )
+                else:
+                    st.caption(
+                        "赤：NG　オレンジ：要確認　緑：OK"
+                    )
 
         with info_col:
             st.write(f"**サイズ**：{summary.width_px} × {summary.height_px}px")
@@ -1553,6 +1852,8 @@ def main() -> None:
     prompts: dict[str, str] = {}
     errors: list[dict[str, str]] = []
     image_bytes_map: dict[str, bytes] = {}
+    highlighted_image_map: dict[str, bytes] = {}
+    highlighted_count_map: dict[str, int] = {}
     results_by_path: dict[str, list[CheckResult]] = {}
     ai_items_by_path: dict[str, list[AICheckItem]] = {}
 
@@ -1577,14 +1878,20 @@ def main() -> None:
             image_info = inspect_image(image_bytes)
 
             ocr_warning = ""
+            ocr_blocks: list[dict[str, Any]] = []
+
             if run_ocr_enabled:
                 try:
-                    ocr_text = run_ocr(image_bytes)
+                    ocr_data = run_ocr(image_bytes)
+                    ocr_text = clean_text(ocr_data.get("text"))
+                    ocr_blocks = list(ocr_data.get("blocks") or [])
                 except Exception as ocr_exc:
                     ocr_text = ""
+                    ocr_blocks = []
                     ocr_warning = str(ocr_exc)
             else:
                 ocr_text = ""
+                ocr_blocks = []
 
             python_results = run_python_checks(
                 file_name=file_name,
@@ -1627,6 +1934,14 @@ def main() -> None:
                 selected_conditions=selected_conditions,
             )
 
+            highlighted_image_bytes, highlighted_count = (
+                create_highlighted_image(
+                    image_bytes=image_bytes,
+                    ocr_blocks=ocr_blocks,
+                    results=python_results,
+                )
+            )
+
             judgment = overall_judgment(python_results)
             file_size_mb = len(image_bytes) / (1024 * 1024)
             sha256 = hashlib.sha256(image_bytes).hexdigest()
@@ -1661,6 +1976,8 @@ def main() -> None:
             all_ai_items.extend(ai_items)
             prompts[relative_path] = prompt
             image_bytes_map[relative_path] = image_bytes
+            highlighted_image_map[relative_path] = highlighted_image_bytes
+            highlighted_count_map[relative_path] = highlighted_count
             results_by_path[relative_path] = python_results
             ai_items_by_path[relative_path] = ai_items
 
@@ -1765,6 +2082,8 @@ def main() -> None:
             ai_items=ai_items_by_path[path],
             prompt=prompts[path],
             image_bytes=image_bytes_map[path],
+            highlighted_image_bytes=highlighted_image_map[path],
+            highlighted_count=highlighted_count_map[path],
         )
 
 

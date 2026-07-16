@@ -1640,15 +1640,28 @@ def main() -> None:
     st.divider()
     st.subheader("集計")
 
-    total_ng = sum(summary.ng_count for summary in summaries)
-    total_review = sum(summary.review_count for summary in summaries)
-    ok_files = sum(summary.overall_judgment == "OK" for summary in summaries)
+    # 集計
+    total_ng = sum(
+        result.judgment == "NG"
+        for result in all_results
+    )
+
+    total_review = sum(
+        result.judgment == "要確認"
+        for result in all_results
+    )
+
+    python_ok_count = sum(
+        result.judgment == "OK"
+        for result in all_results
+    )
 
     col1, col2, col3, col4 = st.columns(4)
+
     col1.metric("処理済み", len(summaries))
-    col2.metric("NG項目", total_ng)
-    col3.metric("要確認項目", total_review)
-    col4.metric("Python判定OK", ok_files)
+    col2.metric("NG", total_ng)
+    col3.metric("要確認", total_review)
+    col4.metric("Python OK", python_ok_count)
 
     result_excel = create_result_excel(
         summaries=summaries,

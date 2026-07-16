@@ -30,7 +30,7 @@ REQUIRED_MASTER_COLUMNS: dict[str, list[str]] = {
     "01_NGワード": [
         "rule_id", "ステータス", "カテゴリ", "対象", "NG表現", "一致方法",
         "判定結果", "NG理由として出力する文言",
-        "AI確認要否", "AI確認カテゴリ", "AIへの確認事項", "AI確認優先度",
+        "AI確認要否", "AI確認カテゴリ", "AIへの確認事項", "AI確認優先度", "除外文言",
     ],
     "02_必須文言": [
         "rule_id", "ステータス", "カテゴリ", "対象", "適用条件コード",
@@ -710,6 +710,16 @@ def check_warning_words(
             continue
 
         warning_word = clean_text(row.get("注意ワード"))
+        exclude_text = clean_text(row.get("除外文言"))
+
+        # 除外文言が含まれる場合はこの注意ワードをスキップ
+        if exclude_text and annotation_matches(
+            ocr_text,
+            exclude_text,
+            "部分一致",
+        ):
+            continue
+
         if matches_rule(
             ocr_text,
             warning_word,

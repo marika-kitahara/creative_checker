@@ -22,7 +22,7 @@ from PIL import Image, UnidentifiedImageError
 # 基本設定
 # ============================================================
 
-APP_TITLE = "楽天銀行 クリエイティブ一次チェック"
+APP_TITLE = "クリエイティブチェッカー"
 SUPPORTED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png"}
 
 REQUIRED_MASTER_COLUMNS: dict[str, list[str]] = {
@@ -1205,7 +1205,7 @@ def main() -> None:
         st.header("1. 判定マスタ")
 
         master_file = st.file_uploader(
-            "AI項目追加版のマスタExcel",
+            "マスタExcel",
             type=["xlsx"],
             accept_multiple_files=False,
             key="master_uploader",

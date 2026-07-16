@@ -657,6 +657,12 @@ def check_required_annotations(
     ocr_text: str,
     master_df: pd.DataFrame,
 ) -> list[CheckResult]:
+    """
+    訴求ワードが検出された場合に必須注釈を確認する。
+
+    - 必須注釈あり：OK
+    - 必須注釈なし：マスタ設定どおり要確認等
+    """
     results: list[CheckResult] = []
 
     for _, row in master_df.iterrows():
@@ -679,7 +685,26 @@ def check_required_annotations(
             clean_text(row.get("注釈一致方法")),
         )
 
-        if not annotation_found:
+        if annotation_found:
+            results.append(
+                CheckResult(
+                    file_name=file_name,
+                    relative_path=relative_path,
+                    rule_id=clean_text(row.get("rule_id")),
+                    rule_type="訴求別必須注釈",
+                    category=clean_text(row.get("カテゴリ")),
+                    judgment="OK",
+                    matched_text=trigger_word,
+                    message="必須注釈を検出しました。",
+                    check_detail=f"検出した注釈：{annotation}",
+                    ai_check_required="不要",
+                    ai_check_category=clean_text(row.get("AI確認カテゴリ")),
+                    ai_check_question="",
+                    ai_priority="低",
+                    detected_by="Python",
+                )
+            )
+        else:
             results.append(
                 make_result(
                     file_name,
@@ -1256,6 +1281,9 @@ def render_result_card(
 # ============================================================
 
 def main() -> None:
+    if "image_uploader_version" not in st.session_state:
+        st.session_state.image_uploader_version = 0
+
     st.set_page_config(
         page_title=APP_TITLE,
         page_icon="🔎",
@@ -1358,12 +1386,29 @@ def main() -> None:
         "画像を複数選択するか、画像が入ったフォルダをこの欄へドラッグ＆ドロップしてください。"
     )
 
-    selected_files = st.file_uploader(
-        "画像ファイルまたはフォルダ",
-        type=sorted(SUPPORTED_IMAGE_EXTENSIONS),
-        accept_multiple_files=True,
-        key="image_uploader",
-    )
+    uploader_col, clear_col = st.columns([5, 1])
+
+    with uploader_col:
+        selected_files = st.file_uploader(
+            "画像ファイルまたはフォルダ",
+            type=sorted(SUPPORTED_IMAGE_EXTENSIONS),
+            accept_multiple_files=True,
+            key=f"image_uploader_{st.session_state.image_uploader_version}",
+        )
+
+    with clear_col:
+        st.write("")
+        st.write("")
+        clear_images = st.button(
+            "全クリア",
+            width="stretch",
+            disabled=not bool(selected_files),
+            help="選択中の画像ファイルをすべてクリアします。",
+        )
+
+    if clear_images:
+        st.session_state.image_uploader_version += 1
+        st.rerun()
 
     uploaded_files: list[Any] = []
     seen_uploads: set[tuple[str, str]] = set()

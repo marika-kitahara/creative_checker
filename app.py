@@ -28,7 +28,7 @@ from utils import (
 )
 
 
-APP_TITLE = "クリエイティブチェッカー Ver2"
+APP_TITLE = "クリエイティブチェッカー"
 SUPPORTED = {"jpg", "jpeg", "png"}
 JUDGMENT_ORDER = {"NG": 1, "要確認": 2, "OK": 3}
 MASTER_URL = "https://rak.box.com/s/0bw4j0ceukpt2is4wbjvwjskaohxejn5"

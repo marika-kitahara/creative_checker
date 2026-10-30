@@ -7,16 +7,13 @@ from typing import Any
 
 import pandas as pd
 
-
 def clean_text(value: Any) -> str:
     if value is None or pd.isna(value):
         return ""
     return str(value).strip()
 
-
 def normalized_text(value: str) -> str:
     return re.sub(r"[\s\u3000]+", "", clean_text(value)).lower()
-
 
 def normalized_annotation_text(value: str) -> str:
     text = unicodedata.normalize("NFKC", clean_text(value)).lower()
@@ -29,7 +26,6 @@ def normalized_annotation_text(value: str) -> str:
         if text.endswith(ending):
             text = text[:-len(ending)]
     return text
-
 
 def annotation_matches(
     ocr_text: str,
@@ -54,7 +50,6 @@ def annotation_matches(
         except re.error:
             return False
     return target in source
-
 
 def matches_rule(text: str, pattern: str, match_method: str) -> bool:
     source = normalized_text(text)
@@ -91,7 +86,6 @@ def matches_rule(text: str, pattern: str, match_method: str) -> bool:
 
     return target in source
 
-
 def split_exclusion_texts(value: str) -> list[str]:
     raw = clean_text(value)
     if not raw:
@@ -102,11 +96,9 @@ def split_exclusion_texts(value: str) -> list[str]:
         if item.strip()
     ]
 
-
 def safe_file_stem(file_name: str) -> str:
     stem = PurePosixPath(file_name.replace("\\", "/")).stem
     return re.sub(r'[\\/:*?"<>|]+', "_", stem).strip() or "creative"
-
 
 def relative_upload_path(uploaded_file: Any) -> str:
     raw_name = clean_text(getattr(uploaded_file, "name", "uploaded_image"))

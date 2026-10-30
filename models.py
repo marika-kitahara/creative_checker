@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 @dataclass
 class CheckResult:
     file_name: str
@@ -20,7 +19,6 @@ class CheckResult:
     ai_priority: str
     detected_by: str = "Python"
 
-
 @dataclass
 class FileSummary:
     file_name: str
@@ -37,7 +35,6 @@ class FileSummary:
     ng_count: int
     review_count: int
 
-
 @dataclass
 class AICheckItem:
     file_name: str
@@ -49,13 +46,11 @@ class AICheckItem:
     question: str
     answer_required: str
 
-
 @dataclass
 class OCRBlock:
     text: str
     box: list[list[float]]
     score: float | None = None
-
 
 @dataclass
 class OCRResult:

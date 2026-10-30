@@ -8,7 +8,6 @@ from PIL import Image, ImageDraw, ImageFont
 from models import CheckResult, OCRBlock
 from utils import clean_text, normalized_annotation_text
 
-
 def _result_terms(result: CheckResult) -> list[str]:
     if result.rule_type in {"必須文言", "必須文言・設定", "システム"}:
         return []
@@ -33,14 +32,12 @@ def _matches(block_text: str, term: str) -> bool:
     target = normalized_annotation_text(term)
     return bool(target and target in block)
 
-
 def _color(judgment: str) -> tuple[int, int, int]:
     return {
         "NG": (220, 30, 30),
         "要確認": (255, 140, 0),
         "OK": (40, 160, 70),
     }.get(judgment, (80, 80, 80))
-
 
 def create_highlighted_image(
     image_bytes: bytes,

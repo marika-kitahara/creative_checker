@@ -15,7 +15,6 @@ from PIL import Image
 from models import AICheckItem, CheckResult, FileSummary
 from utils import clean_text, safe_file_stem
 
-
 FONT_NAME = "Meiryo UI"
 HEADER_FILL = PatternFill("solid", fgColor="5B9BD5")
 NG_FILL = PatternFill("solid", fgColor="F4CCCC")
@@ -50,11 +49,9 @@ AI_NAMES = {
     "question": "AI確認事項", "answer_required": "回答必須",
 }
 
-
 def _df(items: Iterable[Any], columns: list[str]) -> pd.DataFrame:
     rows = [asdict(item) for item in items]
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=columns)
-
 
 def _style(ws) -> None:
     for cell in ws[1]:
@@ -80,7 +77,6 @@ def _style(ws) -> None:
             length = max(length, min(len(value), 60))
         ws.column_dimensions[letter].width = max(10, min(length + 2, 55))
 
-
 def _append(wb: Workbook, name: str, df: pd.DataFrame) -> None:
     ws = wb.create_sheet(name)
     for col, column_name in enumerate(df.columns, 1):
@@ -101,7 +97,6 @@ def _colors(ws, header: str) -> None:
         fill = {"NG": NG_FILL, "要確認": WARN_FILL, "OK": OK_FILL}.get(value)
         if fill:
             ws.cell(row, column).fill = fill
-
 
 def _thumbnails(
     ws,
@@ -126,7 +121,6 @@ def _thumbnails(
             ws.row_dimensions[row_num].height = 72
         except Exception:
             ws.cell(row_num, 1, "画像貼付失敗")
-
 
 def create_result_excel(
     summaries: list[FileSummary],
@@ -172,7 +166,6 @@ def create_result_excel(
     output = BytesIO()
     wb.save(output)
     return output.getvalue()
-
 
 def create_prompt_zip(prompts: dict[str, str]) -> bytes:
     output = BytesIO()

@@ -14,14 +14,11 @@ from utils import (
     split_exclusion_texts,
 )
 
-
 PRIORITY_ORDER = {"高": 1, "中": 2, "低": 3}
 JUDGMENT_ORDER = {"NG": 1, "要確認": 2, "OK": 3}
 
-
 def is_active(row: pd.Series) -> bool:
     return clean_text(row.get("ステータス")) == "有効"
-
 
 def make_result(
     file_name: str,
@@ -48,7 +45,6 @@ def make_result(
         ai_priority=clean_text(row.get("AI確認優先度")) or "中",
     )
 
-
 def sort_results(results: list[CheckResult]) -> list[CheckResult]:
     return sorted(
         results,
@@ -59,7 +55,6 @@ def sort_results(results: list[CheckResult]) -> list[CheckResult]:
         ),
     )
 
-
 def overall_judgment(results: list[CheckResult]) -> str:
     judgments = {result.judgment for result in results}
     if "NG" in judgments:
@@ -67,7 +62,6 @@ def overall_judgment(results: list[CheckResult]) -> str:
     if "要確認" in judgments:
         return "要確認"
     return "OK"
-
 
 def check_format_rules(
     file_name: str,
@@ -128,7 +122,6 @@ def check_format_rules(
             )
     return results
 
-
 def check_ng_words(
     file_name: str,
     relative_path: str,
@@ -150,11 +143,9 @@ def check_ng_words(
             )
     return results
 
-
 def condition_is_applicable(code: str, selected: set[str]) -> bool:
     code = clean_text(code).upper()
     return not code or code == "ALL" or code in selected
-
 
 def check_required_words(
     file_name: str,
@@ -201,7 +192,6 @@ def check_required_words(
             )
     return results
 
-
 def check_warning_words(
     file_name: str,
     relative_path: str,
@@ -237,7 +227,6 @@ def check_warning_words(
                 )
             )
     return results
-
 
 def check_required_annotations(
     file_name: str,
@@ -293,7 +282,6 @@ def check_required_annotations(
             )
     return results
 
-
 def run_checks(
     file_name: str,
     relative_path: str,
@@ -325,7 +313,6 @@ def run_checks(
         master["04_訴求別_必須注釈"],
     )
     return sort_results(results)
-
 
 def build_ai_items(
     file_name: str,

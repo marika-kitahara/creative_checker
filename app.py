@@ -27,12 +27,10 @@ from utils import (
     safe_file_stem,
 )
 
-
 APP_TITLE = "クリエイティブチェッカー"
 SUPPORTED = {"jpg", "jpeg", "png"}
 JUDGMENT_ORDER = {"NG": 1, "要確認": 2, "OK": 3}
 MASTER_URL = "https://rak.box.com/s/0bw4j0ceukpt2is4wbjvwjskaohxejn5"
-
 
 def inspect_image(image_bytes: bytes) -> dict[str, Any]:
     try:
@@ -48,7 +46,6 @@ def inspect_image(image_bytes: bytes) -> dict[str, Any]:
         }
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValueError("画像ファイルを正常に読み込めません。") from exc
-
 
 def build_prompt(
     summary: FileSummary,
@@ -109,7 +106,6 @@ Pythonによる機械判定結果を参考に、人間が確認すべき箇所�
 - 理由：
 - 人間が確認すべき内容：
 """.strip()
-
 
 def render_card(
     summary,
@@ -181,7 +177,6 @@ def render_card(
                 "text/plain",
                 key=f"prompt_{summary.sha256}",
             )
-
 
 def main() -> None:
     if "uploader_version" not in st.session_state:

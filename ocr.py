@@ -9,7 +9,6 @@ from PIL import Image
 from models import OCRBlock, OCRResult
 from utils import clean_text
 
-
 def get_ocr_package_status() -> tuple[bool, str]:
     try:
         from rapidocr import RapidOCR  # noqa: F401
@@ -17,12 +16,10 @@ def get_ocr_package_status() -> tuple[bool, str]:
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
 
-
 @st.cache_resource(show_spinner=False)
 def get_ocr_engine():
     from rapidocr import RapidOCR
     return RapidOCR()
-
 
 def _to_list(value: Any) -> list:
     """NumPy配列・tuple・list・Noneを安全にlist化する。"""
@@ -36,7 +33,6 @@ def _to_list(value: Any) -> list:
         return value
     return []
 
-
 def _normalize_box(raw_box: Any) -> list[list[float]]:
     points = _to_list(raw_box)
     normalized: list[list[float]] = []
@@ -47,7 +43,6 @@ def _normalize_box(raw_box: Any) -> list[list[float]]:
                 [float(point_values[0]), float(point_values[1])]
             )
     return normalized
-
 
 @st.cache_data(show_spinner=False)
 def run_ocr(image_bytes: bytes) -> OCRResult:
@@ -61,7 +56,6 @@ def run_ocr(image_bytes: bytes) -> OCRResult:
 
     blocks: list[OCRBlock] = []
 
-    # RapidOCR 3.x
     if hasattr(output, "txts"):
         texts = _to_list(getattr(output, "txts", None))
         boxes = _to_list(getattr(output, "boxes", None))
@@ -85,7 +79,6 @@ def run_ocr(image_bytes: bytes) -> OCRResult:
             blocks=blocks,
         )
 
-    # 旧形式：(result, elapsed)
     result = output[0] if isinstance(output, tuple) else output
     rows = _to_list(result)
 

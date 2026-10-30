@@ -7,7 +7,6 @@ import streamlit as st
 
 from utils import clean_text
 
-
 REQUIRED_MASTER_COLUMNS: dict[str, list[str]] = {
     "01_NGワード": [
         "rule_id", "ステータス", "カテゴリ", "対象", "NG表現", "一致方法",
@@ -41,7 +40,6 @@ REQUIRED_MASTER_COLUMNS: dict[str, list[str]] = {
         "確認事項", "優先度", "回答必須", "備考",
     ],
 }
-
 
 @st.cache_data(show_spinner=False)
 def load_master_from_bytes(master_bytes: bytes) -> dict[str, pd.DataFrame]:
